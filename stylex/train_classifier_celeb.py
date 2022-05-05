@@ -16,7 +16,8 @@ model_name = "resnet-18-64px-gender.pt"
 print("Cargando model"+str(model_name)+" ...")
 cuda_device = 0
 n_outputs = 2 
-model = load_resnet_classifier(model_name, cuda_device,n_outputs)
+model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=True).to(device)
+model.fc = nn.Linear(512, n_outputs).to(device)
 print(model)
 print("Cargado")
 
@@ -25,87 +26,8 @@ import os
 from PIL import Image
 import pandas as pd
 from torchvision import transforms
-
-class CelebA(data.Dataset):
-    def __init__(self, celeb_dir, csv_path, image_size=32, transform=None, label="male"):
-        """
-        PyTorch DataSet for the FFHQ-Age dataset.
-        :param root: Root folder that contains a directory for the dataset and the csv with labels in the root directory.
-        :param label: Label we want to train on, chosen from the csv labels list.
-        """
-        self.target_class = label
-
-        # Store image paths
-        image_path = os.path.join(celeb_dir, "img_align_celeba", "img_align_celeba")
-        self.images = [os.path.join(image_path, file)
-                       for file in os.listdir(image_path) if file.endswith('.jpg')]
-
-        # Import labels from a CSV file
-        self.labels = pd.read_csv(csv_path)
-
-        # Image transformation
-        self.transform = transform
-        if self.transform is None:
-            self.transform = transforms.Compose([
-                transforms.Resize(image_size),
-                transforms.Resize(224),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
-
-        # Make a lookup dictionary for the labels
-        # Get column names of dataframe
-        cols = self.labels.columns.values
-        label_ids = {col_name: i for i, col_name in enumerate(cols)}
-        self.class_id = label_ids[self.target_class]
-
-    def set_transform(self, transform):
-        self.transform = transform
-
-    def __getitem__(self, index):
-        _img = self.transform(Image.open(self.images[index]))
-        _label = 0 if self.labels.iloc[index, self.class_id] == 1 else 1  # Male will be the first number as with FFHQ upstairs
-        return _img, _label
-
-    def __len__(self):
-        return len(self.images)
-
-
-
-def get_train_valid_test_dataset(celeba_dir, csv_path, label, image_size=32, valid_ratio=0.15, test_ratio=0.15):
-    # TODO: Specify different training routines here per class (such as random crop, random horizontal flip, etc.)
-
-    dataset = CelebA(celeba_dir, csv_path, image_size=image_size, label=label)
-    train_length, valid_length, test_length = int(len(dataset) * (1 - valid_ratio - test_ratio)), \
-                                              int(len(dataset) * valid_ratio), int(len(dataset) * test_ratio)
-    # Make sure that the lengths sum to the total length of the dataset
-    remainder = len(dataset) - train_length - valid_length - test_length
-    train_length += remainder
-    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset,
-                                                                             [train_length, valid_length, test_length],
-                                                                             generator=torch.Generator().manual_seed(42)
-                                                                             )
-    """
-    train_dataset.set_transform = A.Compose(
-        [
-            transforms.Resize(image_size),
-            A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=15, p=0.5),
-            A.HorizontalFlip(p=0.2),
-            A.RandomBrightnessContrast(p=0.3, brightness_limit=0.25, contrast_limit=0.5),
-            A.MotionBlur(p=.2),
-            A.GaussNoise(p=.2),
-            A.ImageCompression(p=.2, quality_lower=50),
-            A.RGBShift(r_shift_limit=15, g_shift_limit=15, b_shift_limit=15, p=0.5),
-            transforms.Resize(224),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            ToTensorV2(),
-        ]
-    )
-    """
-
-    return train_dataset, val_dataset, test_dataset
-
-img_size = 128 #64
+from CelebA_utils import get_train_valid_test_dataset
+img_size = 3 #64
 celeb_train, celeb_val, celeb_test = get_train_valid_test_dataset("../data/CelebA/celeba-dataset/", "../data/CelebA/celeba-dataset/list_attr_celeba.csv", "Male", image_size=img_size)            
 
 torch.cuda.empty_cache()
@@ -168,7 +90,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, test_mode
 
             # Zero out the gradients.
             optimizer.zero_grad()
-
+            print(data.shape)
             # Forward pass.
             output = model(data)
 
@@ -185,15 +107,15 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, test_mode
             if batch_idx % 100 == 0:
                 print('Epoch: {}/{}'.format(epoch + 1, epochs),
                       'Loss: {:.4f}'.format(loss.item()))
+        if((epoch%3)==0):
+            # Validate the model.
+            val_loss, val_acc = validate_model(model, val_loader, criterion)
 
-        # Validate the model.
-        val_loss, val_acc = validate_model(model, val_loader, criterion)
+            # Print the validation loss.
+            print('Validation Loss: {:.4f}'.format(val_loss))
 
-        # Print the validation loss.
-        print('Validation Loss: {:.4f}'.format(val_loss))
-
-        # Print the validation accuracy.
-        print('Validation Accuracy: {:.4f}'.format(val_acc))
+            # Print the validation accuracy.
+            print('Validation Accuracy: {:.4f}'.format(val_acc))
 
     if test_model:
         # Test the model.
@@ -216,4 +138,4 @@ print('Test Loss: {:.4f}'.format(test_loss))
 
 # Print the test accuracy.
 print('Test Accuracy: {:.4f}'.format(test_acc))    
-torch.save(model.state_dict(), './resnet-18-'+img_size+ 'px-age-classifier_full_10epochs_acc_'+str(test_acc)+'.pt')
+torch.save(model.state_dict(), './resnet-18-'+str(img_size)+ 'px-age-classifier_full_10epochs_acc_'+str(test_acc)+'.pt')
