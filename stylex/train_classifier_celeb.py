@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tqdm
-from torchvision import datasets, transforms
+from torchvision import datasets, transforms, models
 from torch.utils.data import DataLoader
 
 import numpy as np
@@ -11,13 +11,17 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from resnet_classifier import load_resnet_classifier
 #torch.cuda.empty_cache()
-device = "cuda:0"
-model_name = "resnet-18-64px-gender.pt"
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") # device object
+if(device == "cpu"):
+    print("ERROR, not GPU available")
+
+model_name = "resnet-50-64px-gender.pt"
 print("Cargando model"+str(model_name)+" ...")
 cuda_device = 0
 n_outputs = 2 
-model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=True).to(device)
-model.fc = nn.Linear(512, n_outputs).to(device)
+model = models.resnet50(pretrained=True).to(device)
+num_features = model.fc.in_features
+model.fc = nn.Linear(num_features, n_outputs).to(device)
 print(model)
 print("Cargado")
 
@@ -29,16 +33,16 @@ from torchvision import transforms
 from CelebA_utils import get_train_valid_test_dataset
 import time
 import copy
-img_size = 256# 3 #64
+img_size = 128# 3 #64
 celeb_train, celeb_val, celeb_test = get_train_valid_test_dataset("../data/CelebA/celeba-dataset/", "../data/CelebA/celeba-dataset/list_attr_celeba.csv", "Male", image_size=img_size)            
 
 
-batch_size = 128
+batch_size = 32
 cel_train_loader = DataLoader(celeb_train, batch_size=batch_size, pin_memory=True)
 cel_val_loader = DataLoader(celeb_val, batch_size=batch_size)
 cel_test_loader = DataLoader(celeb_test, batch_size=batch_size)
 print("Dataset preparado")
-optimizer = optim.Adam(model.parameters(), lr=0.0001)
+optimizer = optim.SGD(model.parameters(), lr=0.001)
 criterion = nn.CrossEntropyLoss()
 
 from tqdm import tqdm
@@ -63,13 +67,13 @@ def validate_model(model, loader, criterion):
             output = model(data)
 
             # Calculate the loss.
-            loss += criterion(output, target).item() * len(target)/128
+            loss += criterion(output, target).item() * len(target)/batch_size
 
             # Get the predictions.
             preds = torch.argmax(output, 1)
 
             # Calculate the accuracy.
-            accuracy += torch.sum(preds == target).item() * len(target)/128
+            accuracy += torch.sum(preds == target).item() * len(target)/batch_size
 
     # Calculate the average loss and accuracy.
     loss /= len(loader)

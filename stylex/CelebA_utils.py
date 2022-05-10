@@ -40,8 +40,7 @@ class CelebA(data.Dataset):
         self.transform = transform
         if self.transform is None:
             self.transform = transforms.Compose([
-                transforms.Resize(image_size),
-                #transforms.Resize(224),
+                transforms.Resize((image_size,image_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
@@ -78,22 +77,13 @@ def get_train_valid_test_dataset(celeba_dir, csv_path, label, image_size=32, val
                                                                              [train_length, valid_length, test_length],
                                                                              generator=torch.Generator().manual_seed(42)
                                                                              )
-    """
-    train_dataset.set_transform = A.Compose(
-        [
-            transforms.Resize(image_size),
-            A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=15, p=0.5),
-            A.HorizontalFlip(p=0.2),
-            A.RandomBrightnessContrast(p=0.3, brightness_limit=0.25, contrast_limit=0.5),
-            A.MotionBlur(p=.2),
-            A.GaussNoise(p=.2),
-            A.ImageCompression(p=.2, quality_lower=50),
-            A.RGBShift(r_shift_limit=15, g_shift_limit=15, b_shift_limit=15, p=0.5),
-            transforms.Resize(224),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            ToTensorV2(),
-        ]
-    )
-    """
+    
+    train_dataset.set_transform =   transforms.Compose([
+        transforms.Resize((image_size, image_size)),
+        transforms.RandomHorizontalFlip(), # data augmentation
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) # normalization
+    ])
+    
 
     return train_dataset, val_dataset, test_dataset
