@@ -46,7 +46,7 @@ hp = Namespace(
 transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Resize((hp.image_size, hp.image_size)),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
 img_dataset = ImageFolder(img_dir, transform)
@@ -55,7 +55,7 @@ subset_idx = int(len(img_dataset)*0.7)
 img_subset = torch.utils.data.Subset(img_dataset, range(subset_idx))
 test_img_subset = torch.utils.data.Subset(img_dataset, range(subset_idx,len(img_dataset)))
 labels = pd.read_csv(attr_path)
-labels = torch.FloatTensor(np.array([l==1 for l in labels["Male"]]))
+labels = torch.LongTensor(np.array([l==1 for l in labels["Male"]]))
 
 images_subset = torch.stack([x for x,_ in tqdm(img_subset)])
 test_images_subset = torch.stack([x for x,_ in tqdm(test_img_subset)])
@@ -116,13 +116,13 @@ class classifier(nn.Module):
             nn.Linear(32, 8),
             nn.Dropout(dropout),
             nn.ReLU(inplace=True),
-            nn.Linear(8, 1)
+            nn.Linear(8, 2)
         )
-        self.sigmoid = nn.Sigmoid()
+        
 
     def forward(self, x):
         x = self.MLP(x)
-        return self.sigmoid(x).squeeze(1)
+        return x
 
 class GenRec(nn.Module):
     def __init__(self, resnet_version=18, coupling_size=512, dropout=0):
@@ -141,7 +141,7 @@ class GenRec(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad or not trainable)
     
     def train_model(self, dloaders, optimizer, hparams,  prints=False):
-        loss_fn = nn.BCELoss()
+        loss_fn = nn.CrossEntropyLoss()
         
         va_losses, va_accs, tr_losses, tr_accs = [], [], [], []
         best_model = copy.deepcopy(self.state_dict())
@@ -156,14 +156,16 @@ class GenRec(nn.Module):
                 for x, y in dloaders[phase]:
                     x, y = x.to(hparams.device), y.to(hparams.device)
                     optimizer.zero_grad()
-                    out = self.forward(x)
-                    loss = loss_fn(out, y)
-                    if phase == "train":
-                        loss.backward()
-                        optimizer.step()
+                    with torch.set_grad_enabled(phase == 'train'):
+                        out = self.forward(x)
+                        loss = loss_fn(out, y)
+                        preds = torch.argmax(out,1)
+                        if phase == "train":
+                            loss.backward()
+                            optimizer.step()
                     # Training stats
                     accum_loss += loss.item() * x.size(0)
-                    preds = torch.round(out).detach()
+                   
                     accum_acc += torch.sum(preds == y).item()
                 n = len(dloaders[phase].dataset)
                 epoch_loss, epoch_acc = accum_loss/n, accum_acc/n
@@ -193,7 +195,7 @@ class GenRec(nn.Module):
             out = self.forward(x)
             
             
-            preds = torch.round(out).detach()
+            preds = torch.argmax(out,1)
             accum_acc += torch.sum(preds == y).item()
         n = len(test_dloader.dataset)
         epoch_acc =  accum_acc/n
@@ -228,5 +230,5 @@ va_info, tr_info = gr_mod.train_model(dloader_dict, optimizer, hp, prints=True)
 test_info = gr_mod.test_model(test_dloader,hp,prints=True)
 print(test_info)
 # Save model's parameters to a file
-torch.save(gr_mod.state_dict(), "./model_checkpoint_px"+str(hp.image_size)+"_t_acc"+str(test_info['acc'])+".pth")
+torch.save(gr_mod.state_dict(), "./model_checkpoint_softmax_px"+str(hp.image_size)+"_t_acc"+str(test_info['acc'])+".pth")
 
