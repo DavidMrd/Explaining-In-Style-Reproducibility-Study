@@ -37,7 +37,7 @@ hp = Namespace(
     weight_decay = 0,
     num_epochs = 10,
     batch_size = 32,
-    perc_tr = .7,
+    perc_tr = .8,
     resnet_version = 18,
     device = "cuda" if torch.cuda.is_available() else "cpu"
 )
@@ -50,25 +50,31 @@ transform = transforms.Compose([
 ])
 
 img_dataset = ImageFolder(img_dir, transform)
+#images 1-162770 are training, 162771-182637 are validation, 182638-202599 are testing
+max_idx_train = 162770
+max_idx_trainval = 182637
 
-subset_idx = int(len(img_dataset)*0.7)
-img_subset = torch.utils.data.Subset(img_dataset, range(subset_idx))
-test_img_subset = torch.utils.data.Subset(img_dataset, range(subset_idx,len(img_dataset)))
+trainval_subset_idx = max_idx_trainval#int(len(img_dataset)*0.8)
+img_subset = torch.utils.data.Subset(img_dataset, range(trainval_subset_idx))
+test_img_subset = torch.utils.data.Subset(img_dataset, range(trainval_subset_idx,len(img_dataset)))
 labels = pd.read_csv(attr_path)
 labels = torch.LongTensor(np.array([l==1 for l in labels["Male"]]))
 
 images_subset = torch.stack([x for x,_ in tqdm(img_subset)])
 test_images_subset = torch.stack([x for x,_ in tqdm(test_img_subset)])
 
-labels_subset = labels[:subset_idx]
-test_labels_subset = labels[subset_idx:len(img_dataset)]
+labels_subset = labels[:trainval_subset_idx]
+test_labels_subset = labels[trainval_subset_idx:len(img_dataset)]
 
-data_subset = data.TensorDataset(images_subset, labels_subset)
+trainval_data_subset = data.TensorDataset(images_subset, labels_subset)
 test_dsubset = data.TensorDataset(test_images_subset, test_labels_subset)
-n = len(data_subset)
-tr_dsubset, va_dsubset = data.random_split(data_subset, [int(n*hp.perc_tr),n-int(n*hp.perc_tr)],
+n = len(trainval_data_subset)
+tr_dsubset, va_dsubset = data.random_split(trainval_data_subset, [int(n*hp.perc_tr)+1,int(n*(1-hp.perc_tr))],
                                            torch.Generator().manual_seed(1234))
 
+print("El numero de imagenes usadas para train es "+str(int(n*hp.perc_tr)+1))
+print("El numero de imagenes usadas para val es "+str(int(n*(1-hp.perc_tr))))
+print("El numero de imagenes usadas para test es "+str(len(test_labels_subset)))
 tr_dloader = data.DataLoader(tr_dsubset, batch_size=hp.batch_size, shuffle=True,num_workers=2, drop_last=True)
 va_dloader = data.DataLoader(va_dsubset, batch_size=hp.batch_size, shuffle=True,num_workers=2, drop_last=True)
 test_dloader = data.DataLoader(test_dsubset, batch_size=hp.batch_size, shuffle=True,num_workers=2, drop_last=True)
@@ -230,5 +236,5 @@ va_info, tr_info = gr_mod.train_model(dloader_dict, optimizer, hp, prints=True)
 test_info = gr_mod.test_model(test_dloader,hp,prints=True)
 print(test_info)
 # Save model's parameters to a file
-torch.save(gr_mod.state_dict(), "./model_checkpoint_softmax_px"+str(hp.image_size)+"_t_acc"+str(test_info['acc'])+".pth")
+torch.save(gr_mod.state_dict(), "./new_resnet_checkpoint_softmax_px"+str(hp.image_size)+"_t_acc"+str(test_info['acc'])+".pth")
 

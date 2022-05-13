@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tqdm
+from tqdm import tqdm
 from torchvision import datasets, transforms, models
 from torch.utils.data import DataLoader
 
@@ -33,17 +34,66 @@ from torchvision import transforms
 from CelebA_utils import get_train_valid_test_dataset
 import time
 import copy
-img_size = 128# 3 #64
-celeb_train, celeb_val, celeb_test = get_train_valid_test_dataset("../data/CelebA/celeba-dataset/", "../data/CelebA/celeba-dataset/list_attr_celeba.csv", "Male", image_size=img_size)            
+#celeb_train, celeb_val, celeb_test = get_train_valid_test_dataset("../data/CelebA/celeba-dataset/", "../data/CelebA/celeba-dataset/list_attr_celeba.csv", "Male", image_size=hp.img_size)            
+# Paths
+celeba_dir = "../data/CelebA/celeba-dataset/"
+attr_path = f"{celeba_dir}list_attr_celeba.csv"
+img_dir = f"{celeba_dir}img_align_celeba/"
 
-
-batch_size = 32
-cel_train_loader = DataLoader(celeb_train, batch_size=batch_size, pin_memory=True)
-cel_val_loader = DataLoader(celeb_val, batch_size=batch_size)
-cel_test_loader = DataLoader(celeb_test, batch_size=batch_size)
-print("Dataset preparado")
 optimizer = optim.SGD(model.parameters(), lr=0.001)
 criterion = nn.CrossEntropyLoss()
+from torchvision.datasets import ImageFolder
+from argparse import Namespace
+hp = Namespace(
+    image_size = 64,  # ResNet needs size multiple of 32
+    dropout = 0,
+    optimizer = "Adam",
+    lr = 1e-3,
+    momentum = .5,
+    weight_decay = 0,
+    num_epochs = 5,
+    batch_size = 32,
+    perc_tr = .8,
+    resnet_version = 18,
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+)
+# Downloads and loading
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Resize((hp.image_size, hp.image_size)),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+img_dataset = ImageFolder(img_dir, transform)
+#images 1-162770 are training, 162771-182637 are validation, 182638-202599 are testing
+max_idx_train = 162770
+max_idx_trainval = 182637
+
+trainval_subset_idx = max_idx_trainval#int(len(img_dataset)*0.8)
+img_subset = torch.utils.data.Subset(img_dataset, range(trainval_subset_idx))
+test_img_subset = torch.utils.data.Subset(img_dataset, range(trainval_subset_idx,len(img_dataset)))
+labels = pd.read_csv(attr_path)
+labels = torch.LongTensor(np.array([l==1 for l in labels["Male"]]))
+
+images_subset = torch.stack([x for x,_ in tqdm(img_subset)])
+test_images_subset = torch.stack([x for x,_ in tqdm(test_img_subset)])
+
+labels_subset = labels[:trainval_subset_idx]
+test_labels_subset = labels[trainval_subset_idx:len(img_dataset)]
+
+trainval_data_subset = data.TensorDataset(images_subset, labels_subset)
+test_dsubset = data.TensorDataset(test_images_subset, test_labels_subset)
+n = len(trainval_data_subset)
+tr_dsubset, va_dsubset = data.random_split(trainval_data_subset, [int(n*hp.perc_tr)+1,int(n*(1-hp.perc_tr))],
+                                           torch.Generator().manual_seed(1234))
+
+
+tr_dloader = data.DataLoader(tr_dsubset, batch_size=hp.batch_size, shuffle=True,num_workers=2, drop_last=True)
+va_dloader = data.DataLoader(va_dsubset, batch_size=hp.batch_size, shuffle=True,num_workers=2, drop_last=True)
+test_dloader = data.DataLoader(test_dsubset, batch_size=hp.batch_size, shuffle=True,num_workers=2, drop_last=True)
+print("El numero de imagenes usadas para train es "+str(len(tr_dloader.dataset)))
+print("El numero de imagenes usadas para val es "+str(len(va_dloader.dataset)))
+print("El numero de imagenes usadas para test es "+str(len(test_dloader.dataset)))
 
 from tqdm import tqdm
 def validate_model(model, loader, criterion):
@@ -67,17 +117,17 @@ def validate_model(model, loader, criterion):
             output = model(data)
 
             # Calculate the loss.
-            loss += criterion(output, target).item() * len(target)/batch_size
+            loss += criterion(output, target).item() * len(target)/hp.batch_size
 
             # Get the predictions.
             preds = torch.argmax(output, 1)
 
             # Calculate the accuracy.
-            accuracy += torch.sum(preds == target).item() * len(target)/batch_size
+            accuracy += torch.sum(preds == target).item() * len(target)/hp.batch_size
 
     # Calculate the average loss and accuracy.
     loss /= len(loader)
-    accuracy /= len(loader) * batch_size
+    accuracy /= len(loader) * hp.batch_size
 
     return loss, accuracy
 
@@ -159,14 +209,14 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, test_mode
     return model, val_acc_history
 
 model.requires_grad_(True)
-train_model(model, cel_train_loader, cel_val_loader, optimizer, criterion, num_epochs=10)
+train_model(model, tr_dloader, va_dloader, optimizer, criterion, num_epochs=hp.num_epochs)
 
 # Test the model.
-test_loss, test_acc = validate_model(model, cel_test_loader, criterion)
+test_loss, test_acc = validate_model(model, test_dloader, criterion)
 
 # Print the test loss.
 print('Test Loss: {:.4f}'.format(test_loss))
 
 # Print the test accuracy.
 print('Test Accuracy: {:.4f}'.format(test_acc))    
-torch.save(model.state_dict(), './resnet-18-'+str(img_size)+ 'px-age-classifier_full_10epochs_acc_'+str(test_acc)+'.pt')
+torch.save(model.state_dict(), './resnet-18-'+str(hp.image_size)+ 'px-gender-classifier_full_10epochs_acc_'+str(test_acc)+'.pt')
